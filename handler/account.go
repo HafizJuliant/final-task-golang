@@ -20,6 +20,7 @@ type AccountInterface interface {
 	TopUp(*gin.Context)
 	Transfer(*gin.Context)
 	Mutation(*gin.Context)
+	Statistics(*gin.Context)
 
 	My(*gin.Context)
 }
@@ -329,4 +330,90 @@ func (a *accountImplement) Mutation(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": transactions})
+}
+
+func (a *accountImplement) Statistics(c *gin.Context) {
+	// Define the structs inside the function
+	type TopUserBalance struct {
+		AccountID int64  `json:"account_id"`
+		Name      string `json:"name"`
+		Balance   int64  `json:"balance"`
+	}
+
+	type AccountStatistics struct {
+		Creator        string         `json:"creator"`
+		CurrentDate    string         `json:"current_date"`
+		TotalUser      int64          `json:"total_user"`
+		TotalBalance   int64          `json:"total_balance"`
+		AverageBalance float64        `json:"average_balance"`
+		TopUserBalance TopUserBalance `json:"top_user_balance"`
+	}
+
+	var totalUsers int64
+	var totalBalance int64
+	var topUser model.Account
+	var account model.Account
+	var averageBalance float64
+	// get account_id from middleware auth
+	accountID := c.GetInt64("account_id")
+
+	// Find first data based on account_id given
+	if err := a.db.First(&account, accountID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{
+				"error": "Not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	// Get total user count
+	if err := a.db.Model(&model.Account{}).Count(&totalUsers).Error; err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to count users"})
+		return
+	}
+
+	// Get total balance
+	if err := a.db.Model(&model.Account{}).Select("SUM(balance)").Scan(&totalBalance).Error; err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to calculate total balance"})
+		return
+	}
+	// Get Average
+	if err := a.db.Model(&model.Account{}).Select("AVG(balance)").Scan(&averageBalance).Error; err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to calculate average balance"})
+		return
+	}
+
+	// Get the top user by balance
+	if err := a.db.Order("balance desc").First(&topUser).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusOK, gin.H{"message": "No users found"})
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve top user"})
+		return
+	}
+
+	// Prepare the response
+	stats := AccountStatistics{
+		Creator:        account.Name,
+		CurrentDate:    time.Now().Format("2006-01-02"), // Format the current date
+		TotalUser:      totalUsers,
+		TotalBalance:   totalBalance,
+		AverageBalance: averageBalance,
+		TopUserBalance: TopUserBalance{
+			AccountID: topUser.AccountID,
+			Name:      topUser.Name,
+			Balance:   topUser.Balance,
+		},
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"stats": stats,
+	})
 }

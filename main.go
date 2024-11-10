@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
@@ -32,11 +33,20 @@ func main() {
 
 	r := gin.Default()
 
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:5173"}, // Replace with your frontend's URL
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+	}))
+
 	// grouping route with /auth
 	authHandler := handler.NewAuth(db, []byte(signingKey))
 	authRoute := r.Group("/auth")
 	authRoute.POST("/login", authHandler.Login)
 	authRoute.POST("/upsert", authHandler.Upsert)
+	authRoute.POST("/change-password", middleware.AuthMiddleware(signingKey), authHandler.ChangePassword)
 
 	// grouping route with /account
 	accountHandler := handler.NewAccount(db)
@@ -53,6 +63,7 @@ func main() {
 	accountRoutes.GET("/balance", middleware.AuthMiddleware(signingKey), accountHandler.Balance)
 	accountRoutes.POST("/transfer", middleware.AuthMiddleware(signingKey), accountHandler.Transfer)
 	accountRoutes.GET("/mutation", middleware.AuthMiddleware(signingKey), accountHandler.Mutation)
+	accountRoutes.GET("/statistics", middleware.AuthMiddleware(signingKey), accountHandler.Statistics)
 
 	// grouping route with /transaction-category
 	transaction_categoryHandler := handler.NewTransCat(db)

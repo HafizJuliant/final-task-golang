@@ -16,6 +16,7 @@ import (
 type AuthInterface interface {
 	Login(*gin.Context)
 	Upsert(*gin.Context)
+	ChangePassword(c *gin.Context)
 }
 
 type authImplement struct {
@@ -161,6 +162,99 @@ func (a *authImplement) Upsert(c *gin.Context) {
 		"data":    payload.Username,
 	})
 }
+func (a *authImplement) ChangePassword(c *gin.Context) {
+
+	var changePasswordPayload struct {
+		NewPassword        string `json:"new_password"`
+		ConfirmNewPassword string `json:"confirm_new_password"`
+	}
+
+	payload := changePasswordPayload
+
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
+		return
+	}
+
+	if payload.NewPassword != payload.ConfirmNewPassword {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Passwords do not match"})
+		return
+	}
+
+	// Get account_id and username from the token claims
+	claims, _ := c.Get("claims")
+	userClaims := claims.(jwt.MapClaims)
+	accountID := int64(userClaims["account_id"].(float64))
+	username := userClaims["username"].(string)
+
+	// Hash the new password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(payload.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		return
+	}
+
+	// Create an authUpsertPayload struct with the new password and call Upsert
+	upsertPayload := authUpsertPayload{
+		AccountID: accountID,
+		Username:  username,
+		Password:  string(hashedPassword),
+	}
+
+	// Set up the request context with the new payload and call the Upsert method
+	c.Set("upsertPayload", upsertPayload)
+	a.Upsert(c)
+}
+
+/*if err := c.ShouldBindJSON(&payload); err != nil {
+	c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
+	return
+}
+
+// Check if the new password matches confirmation
+if payload.NewPassword != payload.ConfirmNewPassword {
+	c.JSON(http.StatusBadRequest, gin.H{"error": "Passwords do not match"})
+	return
+}
+
+// Retrieve the username and account_id from the token claims
+claims, exists := c.Get("claims")
+log.Printf("Claims retrieved: %v", claims)
+
+if !exists {
+	c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	return
+}
+userClaims := claims.(jwt.MapClaims)
+accountID := int64(userClaims["account_id"].(float64))
+username := userClaims["username"].(string)
+log.Printf("Username from claims: %v", userClaims["username"])
+// Validate that the user exists in the database
+var auth model.Auth
+if err := a.db.Where("account_id = ? AND username = ?", accountID, username).First(&auth).Error; err != nil {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+	return
+}
+
+// Hash the new password
+hashedPassword, err := bcrypt.GenerateFromPassword([]byte(payload.NewPassword), bcrypt.DefaultCost)
+if err != nil {
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+	return
+}
+
+// Update the password in the database
+if err := a.db.Model(&model.Auth{}).Where("account_id = ?", accountID).
+	Update("password", string(hashedPassword)).Error; err != nil {
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update password"})
+	return
+}
+
+c.JSON(http.StatusOK, gin.H{"message": "Password updated successfully"})*/
 
 func (a *authImplement) createJWT(auth *model.Auth) (string, error) {
 	// Create the jwt token signer
